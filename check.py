@@ -5,6 +5,8 @@ __author__ = "Benny <benny.think@gmail.com>"
 
 import asyncio
 import logging
+import platform
+import os
 
 import requests
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -18,7 +20,8 @@ api_hash = "19111e9"
 bot_token = "37011I"
 
 client = TelegramClient('client-hc', api_id, api_hash,
-                        device_model="Benny-health-check", system_version="89", app_version="1.0.0")
+                        device_model=f"{platform.system()} {platform.node()}-{os.path.basename(__file__)}",
+                        system_version=platform.platform())
 
 website_list = [
     {"url": "https://yyets.dmesg.app/", "status_code": 200},
