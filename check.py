@@ -3,25 +3,28 @@
 
 __author__ = "Benny <benny.think@gmail.com>"
 
-import asyncio
 import logging
-import platform
 import os
+import random
+import time
 
+import redis
 import requests
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from telethon import TelegramClient, events
+from apscheduler.schedulers.background import BackgroundScheduler
+from pyrogram import Client, filters
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(filename)s(%(lineno)d) [%(levelname)s]: %(message)s')
 logging.getLogger('apscheduler.executors.default').propagate = False
+# logging.getLogger('pyrogram.client').propagate = False
+# logging.getLogger('pyrogram.connection').propagate = False
+# logging.getLogger('pyrogram.session').propagate = False
 
-api_id = 111
-api_hash = "19111e9"
-bot_token = "37011I"
-
-client = TelegramClient('client-hc', api_id, api_hash,
-                        device_model=f"{platform.system()} {platform.node()}-{os.path.basename(__file__)}",
-                        system_version=platform.platform())
+r = redis.StrictRedis(decode_responses=True)
+api_id = os.getenv("API_ID", "111")
+api_hash = os.getenv("API_HASH", "4567uhj")
+alert_bot_token = os.getenv("TOKEN", "149Uaj9is")
+MAX_MISS = 5
+app = Client("check", api_id, api_hash)
 
 website_list = [
     {"url": "https://yyets.dmesg.app/", "status_code": 200},
@@ -30,45 +33,54 @@ website_list = [
 
 # bot name
 bot_list = [
-    {"bot_name": "yyets_bot", "pattern": "(?i).*欢迎使用，直接发送想要的剧集标题给我就可以了.*"},
-    {"bot_name": "benny_ytdlbot", "pattern": "(?i).*Wrapper for youtube-dl.*"},
+    "yyets_bot",
+    "wp_tgbot",
+    "tele_tweetbot",
+    "benny_ytdlbot",
+    "my_gakki_bot",
+    "netease_ncm_bot",
+    "wayback_machine_bot",
+    "wayback_machine_bot",
+    "benny_shudongbot",
+    "KeepMeRunBot",
+    "msg_shredder_bot",
+    "restartme_bot",
 ]
 
-check_status = {}  # bot_name, status
 
-for item in bot_list:
-    pattern = item["pattern"]
-    bot_name = item["bot_name"]
-
-
-    @client.on(events.NewMessage(incoming=True, pattern=pattern, from_users=bot_name))
-    async def my_event_handler(event):
-        entity = await client.get_entity(event.input_chat)
-        logging.info("%s is working.", entity.username)
-        check_status[entity.username] = ""
+def bot_send_start():
+    for name in bot_list:
+        time.sleep(random.random())
+        app.send_message(name, "/start")
+        r.incr(name, 1)
+    bot_check()
 
 
-async def send_health_check():
-    # send /start command to everyone in bot list
-    for name, value in check_status.items():
-        if value:
-            await bot_warning(name)
-
-    for item in bot_list:
-        bot_name = item["bot_name"]
-        await client.send_message(bot_name, '/start')
-        check_status[bot_name] = "check"
-        await asyncio.sleep(1)
+@app.on_message(filters.bot)
+def my_handler(client, message):
+    name = message.chat.username
+    if message:
+        logging.info("%s is responding...", name)
+        if int(r.get(name)) > 0:
+            r.decr(name, 1)
 
 
-async def bot_warning(name):
-    logging.warning("%s seems to be down.", name)
-    message = "%s is down!!!" % name
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage?chat_id=260260121&text={message}"
-    requests.get(url)
+def bot_check():
+    time.sleep(5)
+    for name in bot_list:
+        if int(r.get(name)) >= MAX_MISS:
+            err = "%s errors for %s" % (MAX_MISS, name)
+            logging.error(err)
+            send_alert(err)
 
 
-async def website_check():
+def send_alert(message: str):
+    api = f"https://api.telegram.org/bot{alert_bot_token}/sendMessage?chat_id=260260121&text={message}"
+    resp = requests.get(api).json()
+    logging.info(resp)
+
+
+def website_check():
     for item in website_list:
         url = item["url"]
         resp = None
@@ -83,17 +95,15 @@ async def website_check():
             message += f"{url} content error: \n{content}\n"
 
         if message:
-            api = f"https://api.telegram.org/bot{bot_token}/sendMessage?chat_id=260260121&text={message}"
-            requests.get(api).json()
+            send_alert(message)
             logging.error(message)
         else:
             logging.info("%s OK: %s bytes.", url, len(resp.content))
 
 
 if __name__ == '__main__':
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(send_health_check, 'interval', seconds=300)
+    scheduler = BackgroundScheduler()
     scheduler.add_job(website_check, 'interval', seconds=60)
+    scheduler.add_job(bot_send_start, 'interval', seconds=120)
     scheduler.start()
-    client.start()
-    client.run_until_disconnected()
+    app.run()
